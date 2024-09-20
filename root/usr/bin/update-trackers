@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+# vim: ft=python
+
+# API Reference:
+#   https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-4.1)#get-application-preferences
+#
+# Key values of interest:
+#   add_trackers_enabled	bool	Enable automatic adding of trackers to new torrents
+#   add_trackers	string	List of trackers to add to new torrent
+
+import requests
+import sys
+import os
+import json
+
+QBT_HOST = "http://127.0.0.1"
+QBT_PORT = os.getenv("WEBUI_PORT")
+
+# Tracker list URLs
+TRACKER_LIST_URLS = [
+    "https://newtrackon.com/api/stable",
+    "https://trackerslist.com/best.txt",
+    "https://trackerslist.com/http.txt",
+    "https://raw.githubusercontent.com/ngosang/trackerslist/master/trackers_best.txt",
+]
+
+
+def get_trackers():
+    """Fetch tracker URLs from the specified sources."""
+    trackers = set()
+    for url in TRACKER_LIST_URLS:
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            trackers.update(response.text.strip().splitlines())
+        except requests.RequestException as e:
+            print(f"Error fetching trackers from {url}: {e}", file=sys.stderr)
+    # Remove empty lines and duplicates
+    trackers = {t for t in trackers if t}
+    print(f"Fetched {len(trackers)} unique trackers: {trackers}")
+    return trackers
+
+
+def login(session):
+    """Authenticate with qBittorrent Web API and obtain a session cookie."""
+    login_url = f"{QBT_HOST}:{QBT_PORT}/api/v2/auth/login"
+    try:
+        response = session.post(login_url)
+        response.raise_for_status()
+        if response.text != "Ok.":
+            print("Login failed. Check your credentials.", file=sys.stderr)
+            sys.exit(1)
+    except requests.RequestException as e:
+        print(f"Error during login: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def set_application_preferences(session, trackers):
+    """Update qBittorrent settings to enable automatic adding of trackers."""
+    preferences_url = f"{QBT_HOST}:{QBT_PORT}/api/v2/app/setPreferences"
+    preferences = {"add_trackers_enabled": True, "add_trackers": "\n".join(trackers)}
+    data = {"json": json.dumps(preferences)}
+    try:
+        response = session.post(preferences_url, data=data)
+        print("Response:", response)
+        response.raise_for_status()
+        print("qBittorrent preferences updated successfully.")
+    except requests.RequestException as e:
+        print(f"Error updating preferences: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def main():
+    trackers = get_trackers()
+    if not trackers:
+        print("No trackers fetched. Exiting.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Fetched {len(trackers)} trackers.")
+
+    with requests.Session() as session:
+        login(session)
+        set_application_preferences(session, trackers)
+
+
+if __name__ == "__main__":
+    main()
